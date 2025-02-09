@@ -30,7 +30,10 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         if self.request.user.is_staff:
             return Project.objects.all()
-        return Project.objects.filter(members__user=self.request.user)
+        return Project.objects.filter(
+            members__user_email=self.request.user.email,
+            members__status='active'
+        )
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -40,15 +43,14 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         return ProjectDetailSerializer
 
     def perform_create(self, serializer):
-        """Créer un nouveau projet"""
         with transaction.atomic():
-            # Utilisez l'utilisateur actuellement authentifié
             project = serializer.save(owner=self.request.user)
             
             ProjectMember.objects.create(
                 project=project,
-                user=self.request.user,
+                user_email=self.request.user.email,
                 role='owner',
+                status='active',
                 joined_at=timezone.now().date()
             )
             
@@ -102,20 +104,30 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        email = serializer.validated_data['user']
+        email = serializer.validated_data['user_email']
         role = serializer.validated_data.get('role', 'collaborator')
 
         # Vérifier si l'utilisateur existe déjà dans le projet
-        if ProjectMember.objects.filter(
+        existing_member = ProjectMember.objects.filter(
             project=project,
-            user__email=email
-        ).exists():
+            user_email=email
+        ).first()
+
+        if existing_member:
+            if existing_member.status == 'inactive':
+                existing_member.status = 'active'
+                existing_member.role = role
+                existing_member.save()
+                return Response(
+                    {"message": "Membre réactivé avec succès"},
+                    status=status.HTTP_200_OK
+                )
             return Response(
                 {"error": "L'utilisateur est déjà membre du projet"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Récupérer le token d'authentification de la requête entrante
+        # Récupérer le token d'authentification
         auth_header = request.headers.get('Authorization')
         if not auth_header:
             return Response(
@@ -123,44 +135,48 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
-        # Préparation des headers pour la requête au microservice
-        headers = {
-            'Authorization': auth_header
-        }
-
         # Vérifier l'utilisateur auprès du microservice d'authentification
         try:
             response = requests.get(
-                f"https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/profile/",
+                "https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/profile/",
                 params={"email": email},
-                headers=headers,
+                headers={'Authorization': auth_header},
                 timeout=10
             )
 
-            if response.status_code == 401:
-                return Response(
-                    {"error": "Token d'authentification invalide ou expiré"},
-                    status=status.HTTP_401_UNAUTHORIZED
-                )
-
-            if response.status_code == 404:
-                return Response(
-                    {"error": "Utilisateur non trouvé ou non vérifié dans le système d'authentification"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
             if response.status_code != 200:
                 return Response(
-                    {
-                        "error": "Erreur lors de la vérification de l'utilisateur",
-                        "status_code": response.status_code,
-                        "detail": response.text
-                    },
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                    {"error": "Utilisateur non trouvé ou non autorisé"},
+                    status=response.status_code
                 )
 
-            # Récupérer les données de l'utilisateur
-            user_data = response.json()
+            # Créer le membre avec transaction atomique
+            with transaction.atomic():
+                member = ProjectMember.objects.create(
+                    project=project,
+                    user_email=email,
+                    role=role,
+                    status='active'
+                )
+
+                # Logger le changement
+                project.logs.create(
+                    user=request.user,
+                    action='member_added',
+                    changes={
+                        'email': email,
+                        'role': role
+                    },
+                    description=f"Ajout du membre {email} avec le rôle {role}"
+                )
+
+                return Response(
+                    {
+                        "message": "Membre ajouté avec succès",
+                        "member": ProjectMemberSerializer(member).data
+                    },
+                    status=status.HTTP_201_CREATED
+                )
 
         except requests.RequestException as e:
             return Response(
@@ -171,60 +187,9 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
-        try:
-            with transaction.atomic():
-                # Créer ou mettre à jour l'utilisateur local
-                user, _ = User.objects.update_or_create(
-                    email=user_data['email'],
-                    defaults={
-                        'username': user_data['username'],
-                        'first_name': user_data['first_name'],
-                        'last_name': user_data['last_name'],
-                    }
-                )
-
-                # Créer le membre du projet
-                member = ProjectMember.objects.create(
-                    project=project,
-                    user=user,
-                    role=role,
-                    joined_at=timezone.now().date(),
-                    status='active'
-                )
-
-                # Créer une entrée dans le journal des modifications
-                project.logs.create(
-                    user=request.user,
-                    action='member_added',
-                    changes={
-                        'user_id': user.id,
-                        'email': user.email,
-                        'role': role
-                    },
-                    description=f"Ajout du membre {user.email} avec le rôle {role}"
-                )
-
-                # Sérialiser la réponse
-                response_data = ProjectMemberSerializer(member).data
-                
-                return Response(
-                    {
-                        "message": "Membre ajouté avec succès",
-                        "member": response_data
-                    },
-                    status=status.HTTP_201_CREATED
-                )
-
-        except Exception as e:
-            return Response(
-                {"error": f"Erreur lors de l'ajout du membre: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
 
     @action(detail=True, methods=['delete'])
     def remove_member(self, request, pk=None):
-        """Retirer un membre du projet"""
         project = self.get_object()
         if not IsProjectOwner().has_object_permission(request, self, project):
             return Response(
@@ -232,22 +197,37 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        user_id = request.query_params.get('user_id')
-        if not user_id:
+        email = request.query_params.get('email')  # Changé de user_id à email
+        if not email:
             return Response(
-                {"error": "L'ID de l'utilisateur est requis"},
+                {"error": "L'email de l'utilisateur est requis"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            member = ProjectMember.objects.get(project=project, user_id=user_id)
+            member = ProjectMember.objects.get(
+                project=project, 
+                user_email=email,
+                status='active'
+            )
             if member.role == 'owner':
                 return Response(
                     {"error": "Impossible de retirer le propriétaire du projet"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            member.delete()
+            # Au lieu de supprimer, on met à jour le statut
+            member.status = 'inactive'
+            member.save()
+            
+            # Logger le changement
+            self._log_change(
+                project=project,
+                action='member_removed',
+                changes={'email': email},
+                description=f"Retrait du membre {email}"
+            )
+            
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ProjectMember.DoesNotExist:
             return Response(

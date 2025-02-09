@@ -12,7 +12,10 @@ class IsProjectMember(permissions.BasePermission):
             project = obj.project
         else:
             project = obj
-        return project.members.filter(user=request.user).exists()
+        return project.members.filter(
+            user_email=request.user.email,
+            status='active'
+        ).exists()
 
 class HasProjectRole(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
@@ -20,7 +23,10 @@ class HasProjectRole(permissions.BasePermission):
             return True
             
         project = obj if hasattr(obj, 'owner') else obj.project
-        member = project.members.filter(user=request.user).first()
+        member = project.members.filter(
+            user_email=request.user.email,
+            status='active'
+        ).first()
         
         if not member:
             return False

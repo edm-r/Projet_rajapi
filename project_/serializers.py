@@ -52,13 +52,12 @@ class TaskSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at', 'assigned_by']
 
 class ProjectMemberSerializer(serializers.ModelSerializer):
-    user = serializers.EmailField()
-    user_details = UserSerializer(source='user', read_only=True)
+    user = serializers.EmailField(source='user_email')
     
     class Meta:
         model = ProjectMember
-        fields = ['id', 'user', 'role', 'joined_at', 'status', 'user_details']
-        read_only_fields = ['joined_at', 'user_details']
+        fields = ['id', 'user', 'role', 'joined_at', 'status']
+        read_only_fields = ['joined_at']
 
 class ProjectChangeLogSerializer(serializers.ModelSerializer):
     action_display = serializers.CharField(source='get_action_display', read_only=True)
