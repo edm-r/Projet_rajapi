@@ -14,15 +14,11 @@ from ..serializers import (
     ProjectMemberSerializer, ProjectUpdateSerializer,
     RestoreVersionSerializer, ProjectDocumentSerializer
 )
+import requests
 from ..permissions import IsProjectOwner, IsProjectMember, HasProjectRole
 from .mixins import ChangeLogMixin
 from ..authentication import MicroserviceTokenAuthentication
 User = get_user_model()
-import requests
-import logging
-from django.conf import settings
-
-logger = logging.getLogger(__name__)
 class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
     authentication_classes = [MicroserviceTokenAuthentication]
     permission_classes = [IsAuthenticated, HasProjectRole]
@@ -49,12 +45,11 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
             # Utilisez l'utilisateur actuellement authentifié
             project = serializer.save(owner=self.request.user)
             
-            # Ajouter le propriétaire en tant que membre du projet
             ProjectMember.objects.create(
                 project=project,
-                user_id=str(self.request.user.id),  # Utilisation de user_id
+                user=self.request.user,
                 role='owner',
-                status='active'
+                joined_at=timezone.now().date()
             )
             
             self._log_change(
@@ -92,62 +87,140 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
     # Actions pour la gestion des membres
     @action(detail=True, methods=['post'])
     def add_member(self, request, pk=None):
-        """Ajouter un membre au projet après vérification via le microservice d'authentification"""
+        """Ajouter un membre au projet avec vérification via microservice d'authentification"""
         project = self.get_object()
         
+        # Vérifier les permissions
         if not IsProjectOwner().has_object_permission(request, self, project):
-            return Response({"error": "Seul le propriétaire peut ajouter des membres"}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"error": "Seul le propriétaire peut ajouter des membres"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
+        # Valider les données d'entrée
         serializer = ProjectMemberSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data['user']
-        
-        # 🔍 Vérification de l'utilisateur via le microservice d'authentification
-        auth_service_url = "https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/profile/"
-        auth_token = request.headers.get("Authorization")  # Récupérer le token de l'utilisateur actuel
+        role = serializer.validated_data.get('role', 'collaborator')
 
-        if not auth_token:
-            return Response({"error": "Token d'authentification manquant"}, status=status.HTTP_401_UNAUTHORIZED)
+        # Vérifier si l'utilisateur existe déjà dans le projet
+        if ProjectMember.objects.filter(
+            project=project,
+            user__email=email
+        ).exists():
+            return Response(
+                {"error": "L'utilisateur est déjà membre du projet"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        headers = {"Authorization": auth_token}
+        # Récupérer le token d'authentification de la requête entrante
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            return Response(
+                {"error": "Token d'authentification manquant"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Préparation des headers pour la requête au microservice
+        headers = {
+            'Authorization': auth_header
+        }
+
+        # Vérifier l'utilisateur auprès du microservice d'authentification
+        try:
+            response = requests.get(
+                f"https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/profile/",
+                params={"email": email},
+                headers=headers,
+                timeout=10
+            )
+
+            if response.status_code == 401:
+                return Response(
+                    {"error": "Token d'authentification invalide ou expiré"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+
+            if response.status_code == 404:
+                return Response(
+                    {"error": "Utilisateur non trouvé ou non vérifié dans le système d'authentification"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            if response.status_code != 200:
+                return Response(
+                    {
+                        "error": "Erreur lors de la vérification de l'utilisateur",
+                        "status_code": response.status_code,
+                        "detail": response.text
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+
+            # Récupérer les données de l'utilisateur
+            user_data = response.json()
+
+        except requests.RequestException as e:
+            return Response(
+                {
+                    "error": "Erreur de communication avec le service d'authentification",
+                    "detail": str(e)
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
 
         try:
-            response = requests.get(auth_service_url, params={"email": email}, headers=headers, timeout=5)
-            
-            # Si l'utilisateur n'existe pas, retourner une erreur
-            if response.status_code == 404:
-                return Response({"error": "Utilisateur non trouvé dans le microservice"}, status=status.HTTP_404_NOT_FOUND)
+            with transaction.atomic():
+                # Créer ou mettre à jour l'utilisateur local
+                user, _ = User.objects.update_or_create(
+                    email=user_data['email'],
+                    defaults={
+                        'username': user_data['username'],
+                        'first_name': user_data['first_name'],
+                        'last_name': user_data['last_name'],
+                    }
+                )
 
-            response.raise_for_status()
-            user_data = response.json()
-        except requests.exceptions.HTTPError as http_err:
-            logger.error(f"Erreur HTTP lors de la communication avec le microservice: {http_err}")
-            return Response({"error": f"Erreur du microservice: {response.status_code}"}, status=response.status_code)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Erreur lors de la communication avec le microservice: {e}")
-            return Response({"error": "Erreur lors de la communication avec le microservice"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                # Créer le membre du projet
+                member = ProjectMember.objects.create(
+                    project=project,
+                    user=user,
+                    role=role,
+                    joined_at=timezone.now().date(),
+                    status='active'
+                )
 
-        user_id = user_data.get("id")
+                # Créer une entrée dans le journal des modifications
+                project.logs.create(
+                    user=request.user,
+                    action='member_added',
+                    changes={
+                        'user_id': user.id,
+                        'email': user.email,
+                        'role': role
+                    },
+                    description=f"Ajout du membre {user.email} avec le rôle {role}"
+                )
 
-        if not user_id:
-            logger.error(f"Réponse invalide du microservice: {user_data}")
-            return Response({"error": "Réponse invalide du microservice"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                # Sérialiser la réponse
+                response_data = ProjectMemberSerializer(member).data
+                
+                return Response(
+                    {
+                        "message": "Membre ajouté avec succès",
+                        "member": response_data
+                    },
+                    status=status.HTTP_201_CREATED
+                )
 
-        # Vérifier si l'utilisateur est déjà membre du projet
-        if ProjectMember.objects.filter(project=project, user_id=user_id).exists():
-            return Response({"error": "L'utilisateur est déjà membre du projet"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response(
+                {"error": f"Erreur lors de l'ajout du membre: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        # 🔥 Ajouter l'utilisateur au projet en utilisant uniquement l'ID
-        member = ProjectMember.objects.create(
-            project=project,
-            user_id=user_id,  # Utilisation de l'ID de l'utilisateur
-            role=serializer.validated_data.get('role', 'collaborator'),  # Rôle par défaut
-            status='active'
-        )
-
-        return Response(ProjectMemberSerializer(member).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['delete'])
     def remove_member(self, request, pk=None):

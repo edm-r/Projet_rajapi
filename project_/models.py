@@ -175,13 +175,17 @@ class ProjectMember(models.Model):
     ]
     
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='members')
-    user_id = models.CharField(max_length=255)  # Stocker l'ID de l'utilisateur
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='project_memberships'
+    )
     role = models.CharField(max_length=50, choices=ROLE_CHOICES)
     joined_at = models.DateField(auto_now_add=True)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='active')
 
     class Meta:
-        unique_together = ['project', 'user_id']
+        unique_together = ['project', 'user']
 
     def __str__(self):
-        return f"{self.user_id} - {self.role} - {self.project.reference_number}"
+        return f"{self.user.username} - {self.role} - {self.project.reference_number}"
