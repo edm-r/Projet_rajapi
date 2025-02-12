@@ -19,9 +19,19 @@ class TaskViewSet(ChangeLogMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         return Task.objects.filter(project_id=self.kwargs['project_pk'])
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        project = get_object_or_404(Project, id=self.kwargs['project_pk'])
+        context['project'] = project
+        return context
+
     def perform_create(self, serializer):
         project = get_object_or_404(Project, id=self.kwargs['project_pk'])
-        task = serializer.save(project=project, assigned_by=self.request.user)
+        
+        task = serializer.save(
+            project=project,
+            assigned_by=self.request.user
+        )
 
         self._log_change(
             project=project,
@@ -29,7 +39,7 @@ class TaskViewSet(ChangeLogMixin, viewsets.ModelViewSet):
             changes={
                 'task_id': task.id,
                 'title': task.title,
-                'assigned_to': task.assigned_to.get_full_name() if task.assigned_to else None
+                'assigned_to': task.assigned_to
             },
             description=f"Ajout de la tâche: {task.title}"
         )
@@ -57,13 +67,18 @@ class TaskViewSet(ChangeLogMixin, viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         project = instance.project
         with transaction.atomic():
+            # Créer le log avant la suppression
             self._log_change(
                 project=project,
                 action='task_deleted',
                 changes={
                     'task_id': instance.id,
-                    'title': instance.title
+                    'title': instance.title,
+                    'description': instance.description,
+                    'assigned_to': instance.assigned_to,
+                    'status': instance.status
                 },
                 description=f"Suppression de la tâche: {instance.title}"
             )
+            # Supprimer la tâche
             instance.delete()

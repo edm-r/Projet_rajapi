@@ -32,24 +32,61 @@ class ProjectDocumentSerializer(serializers.ModelSerializer):
         return None
 
 class TaskSerializer(serializers.ModelSerializer):
-    assigned_to = serializers.SlugRelatedField(
-        slug_field='username',
-        queryset=User.objects.all(),
-        allow_null=True,
-        required=False,
-        error_messages={'does_not_exist': 'Collaborator don\'t exist.'}
-    )
-    assigned_to_details = UserSerializer(source='assigned_to', read_only=True)
+    assigned_to = serializers.EmailField(required=False, allow_null=True)
     assigned_by_details = UserSerializer(source='assigned_by', read_only=True)
+    assigned_to_email = serializers.SerializerMethodField(read_only=True)
+    status = serializers.ChoiceField(choices=['open', 'closed'], required=False)
 
     class Meta:
         model = Task
         fields = [
-            'id', 'title', 'description', 'assigned_to', 'assigned_by',
+            'id', 'title', 'description', 'assigned_to',
             'due_date', 'status', 'created_at', 'updated_at',
-            'assigned_to_details', 'assigned_by_details'
+            'assigned_by_details', 'assigned_to_email'
         ]
         read_only_fields = ['created_at', 'updated_at', 'assigned_by']
+        extra_kwargs = {
+            'title': {'required': False},
+            'description': {'required': False},
+            'due_date': {'required': False}
+        }
+
+    def get_assigned_to_email(self, obj):
+        if obj.assigned_to:
+            return {
+                'email': obj.assigned_to
+            }
+        return None
+
+    def validate_assigned_to(self, value):
+        """
+        Vérifie que l'utilisateur assigné est un membre du projet.
+        """
+        if value is None:
+            return None
+
+        project = self.context.get('project')
+        if not project:
+            raise serializers.ValidationError("Le projet n'a pas été trouvé dans le contexte.")
+
+        try:
+            member = project.members.get(user_email=value, status='active')
+            return member.user_email
+        except ProjectMember.DoesNotExist:
+            raise serializers.ValidationError("Le collaborateur n'est pas un membre du projet.")
+
+    def validate(self, attrs):
+        """
+        Validation supplémentaire pour s'assurer que les champs requis sont présents lors de la création
+        """
+        if self.instance is None:  # C'est une création
+            required_fields = ['title', 'description', 'due_date']
+            missing_fields = [field for field in required_fields if field not in attrs]
+            if missing_fields:
+                raise serializers.ValidationError({
+                    field: ["Ce champ est obligatoire."] for field in missing_fields
+                })
+        return attrs
 
 class ProjectMemberSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source='user_email')
