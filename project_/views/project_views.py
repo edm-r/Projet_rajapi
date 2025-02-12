@@ -8,17 +8,24 @@ from django.forms.models import model_to_dict
 from django.db import transaction
 from datetime import datetime, date
 from django.contrib.auth import get_user_model
-from ..models import Project, ProjectMember, ProjectChangeLog, ProjectDocument
+import requests
+
+from ..models import (
+    Project, ProjectMember, ProjectChangeLog, 
+    ProjectDocument
+)
 from ..serializers import (
     ProjectDetailSerializer, ProjectListSerializer,
     ProjectMemberSerializer, ProjectUpdateSerializer,
     RestoreVersionSerializer, ProjectDocumentSerializer
 )
-import requests
 from ..permissions import IsProjectOwner, IsProjectMember, HasProjectRole
 from .mixins import ChangeLogMixin
 from ..authentication import MicroserviceTokenAuthentication
+from ..services import ProjectMemberService
+
 User = get_user_model()
+
 class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
     authentication_classes = [MicroserviceTokenAuthentication]
     permission_classes = [IsAuthenticated, HasProjectRole]
@@ -27,9 +34,30 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
     search_fields = ['title', 'description', 'objectives', 'reference_number']
     ordering_fields = ['created_at', 'deadline']
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.member_service = ProjectMemberService()
+
     def get_queryset(self):
         if self.request.user.is_staff:
             return Project.objects.all()
+            
+        # Vérifier le statut du membre avant de retourner les projets
+        auth_header = self.request.headers.get('Authorization')
+        projects = Project.objects.filter(
+            members__user_email=self.request.user.email,
+            members__status='active'
+        )
+        
+        # Vérifier le statut du membre pour chaque projet
+        for project in projects:
+            member = project.members.get(
+                user_email=self.request.user.email,
+                status='active'
+            )
+            self.member_service.verify_member(member, auth_header)
+            
+        # Requête mise à jour après vérifications
         return Project.objects.filter(
             members__user_email=self.request.user.email,
             members__status='active'
@@ -46,12 +74,14 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         with transaction.atomic():
             project = serializer.save(owner=self.request.user)
             
+            # Créer le membre propriétaire
             ProjectMember.objects.create(
                 project=project,
                 user_email=self.request.user.email,
                 role='owner',
                 status='active',
-                joined_at=timezone.now().date()
+                joined_at=timezone.now().date(),
+                last_verified_at=timezone.now()
             )
             
             self._log_change(
@@ -86,107 +116,73 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
             )
             instance.delete()
 
-    # Actions pour la gestion des membres
     @action(detail=True, methods=['post'])
     def add_member(self, request, pk=None):
         """Ajouter un membre au projet avec vérification via microservice d'authentification"""
         project = self.get_object()
         
-        # Vérifier les permissions
         if not IsProjectOwner().has_object_permission(request, self, project):
             return Response(
                 {"error": "Seul le propriétaire peut ajouter des membres"},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Valider les données d'entrée
         serializer = ProjectMemberSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data['user_email']
         role = serializer.validated_data.get('role', 'collaborator')
-
-        # Vérifier si l'utilisateur existe déjà dans le projet
-        existing_member = ProjectMember.objects.filter(
-            project=project,
-            user_email=email
-        ).first()
-
-        if existing_member:
-            if existing_member.status == 'inactive':
-                existing_member.status = 'active'
-                existing_member.role = role
-                existing_member.save()
-                return Response(
-                    {"message": "Membre réactivé avec succès"},
-                    status=status.HTTP_200_OK
-                )
-            return Response(
-                {"error": "L'utilisateur est déjà membre du projet"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Récupérer le token d'authentification
         auth_header = request.headers.get('Authorization')
-        if not auth_header:
-            return Response(
-                {"error": "Token d'authentification manquant"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
 
-        # Vérifier l'utilisateur auprès du microservice d'authentification
+        # Vérifier si l'utilisateur existe dans le service d'auth et récupérer son profil
         try:
-            response = requests.get(
-                "https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/profile/",
-                params={"email": email},
-                headers={'Authorization': auth_header},
-                timeout=10
-            )
+            user_profile = self.member_service.auth_service.get_user_profile(email, auth_header)
+            username = user_profile.get('username')  # Récupérer le username depuis le profil
 
-            if response.status_code != 200:
-                return Response(
-                    {"error": "Utilisateur non trouvé ou non autorisé"},
-                    status=response.status_code
-                )
-
-            # Créer le membre avec transaction atomique
             with transaction.atomic():
-                member = ProjectMember.objects.create(
+                member, created = ProjectMember.objects.get_or_create(
                     project=project,
                     user_email=email,
-                    role=role,
-                    status='active'
+                    defaults={
+                        'role': role,
+                        'status': 'active',
+                        'last_verified_at': timezone.now(),
+                        'username': username  # Ajout du username
+                    }
                 )
 
-                # Logger le changement
-                project.logs.create(
-                    user=request.user,
+                if not created:
+                    if member.status == 'inactive':
+                        member.status = 'active'
+                        member.role = role
+                        member.last_verified_at = timezone.now()
+                        member.username = username  # Mise à jour du username
+                        member.save()
+                    else:
+                        return Response(
+                            {"error": "L'utilisateur est déjà membre du projet"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                self._log_change(
+                    project=project,
                     action='member_added',
-                    changes={
-                        'email': email,
-                        'role': role
-                    },
-                    description=f"Ajout du membre {email} avec le rôle {role}"
+                    changes={'email': email, 'role': role, 'username': username},
+                    description=f"Ajout du membre {email} (username: {username}) avec le rôle {role}"
                 )
 
                 return Response(
-                    {
-                        "message": "Membre ajouté avec succès",
-                        "member": ProjectMemberSerializer(member).data
-                    },
+                    {"message": "Membre ajouté avec succès", 
+                    "member": ProjectMemberSerializer(member).data},
                     status=status.HTTP_201_CREATED
                 )
 
         except requests.RequestException as e:
             return Response(
-                {
-                    "error": "Erreur de communication avec le service d'authentification",
-                    "detail": str(e)
-                },
+                {"error": "Erreur de communication avec le service d'authentification"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
-
 
     @action(detail=True, methods=['delete'])
     def remove_member(self, request, pk=None):
@@ -197,7 +193,7 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        email = request.query_params.get('email')  # Changé de user_id à email
+        email = request.query_params.get('email')
         if not email:
             return Response(
                 {"error": "L'email de l'utilisateur est requis"},
@@ -216,11 +212,9 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Au lieu de supprimer, on met à jour le statut
             member.status = 'inactive'
             member.save()
             
-            # Logger le changement
             self._log_change(
                 project=project,
                 action='member_removed',
@@ -235,8 +229,100 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+    @action(detail=True, methods=['post'])
+    def verify_members(self, request, pk=None):
+        """Vérifie le statut de tous les membres du projet"""
+        project = self.get_object()
+        
+        if not IsProjectOwner().has_object_permission(request, self, project):
+            return Response(
+                {"error": "Seul le propriétaire peut vérifier les membres"},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
-    # Actions pour la gestion des versions
+        auth_header = request.headers.get('Authorization')
+        results = self.member_service.verify_all_members(project, auth_header)
+
+        if results['deactivated']:
+            self._log_change(
+                project=project,
+                action='member_removed',
+                changes={'deactivated_members': results['deactivated']},
+                description=f"Membres désactivés suite à la vérification: {', '.join(results['deactivated'])}"
+            )
+
+        return Response({
+            "message": "Vérification des membres terminée",
+            "results": results
+        })
+    
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        """Liste tous les membres d'un projet avec leur statut de vérification"""
+        project = self.get_object()
+        
+        # Vérifier que l'utilisateur est membre du projet
+        if not IsProjectMember().has_object_permission(request, self, project):
+            return Response(
+                {"error": "Vous n'êtes pas autorisé à voir les membres de ce projet"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Optionnel : paramètre pour filtrer par statut
+        status_filter = request.query_params.get('status', None)
+        members = project.members.all()
+        
+        if status_filter:
+            members = members.filter(status=status_filter)
+
+        # Préparer les données des membres avec des informations supplémentaires
+        members_data = []
+        auth_header = request.headers.get('Authorization')
+        
+        for member in members:
+            member_data = ProjectMemberSerializer(member).data
+            
+            # Ajouter des informations supplémentaires si le membre est actif
+            if member.status == 'active':
+                try:
+                    user_profile = self.member_service.auth_service.get_user_profile(
+                        member.user_email, 
+                        auth_header
+                    )
+                    member_data.update({
+                        'full_name': f"{user_profile.get('first_name', '')} {user_profile.get('last_name', '')}".strip(),
+                        'last_verified': member.last_verified_at.isoformat() if member.last_verified_at else None
+                    })
+                except requests.RequestException:
+                    # En cas d'erreur, on continue avec les données de base
+                    member_data.update({
+                        'full_name': member.user_email,
+                        'last_verified': member.last_verified_at.isoformat() if member.last_verified_at else None
+                    })
+            
+            members_data.append(member_data)
+
+        # Trier les membres : propriétaire en premier, puis par rôle et email
+        members_data.sort(key=lambda x: (
+            x['role'] != 'owner',  # propriétaire en premier
+            {
+                'owner': 0,
+                'collaborator': 1,
+                'viewer': 2
+            }.get(x['role'], 3),  # puis par rôle
+            x['email']  # puis par email
+        ))
+
+        return Response({
+            'project': {
+                'id': project.id,
+                'reference_number': project.reference_number,
+                'title': project.title
+            },
+            'members_count': len(members_data),
+            'members': members_data,
+        })
+
     @action(detail=True, methods=['get'])
     def versions(self, request, pk=None):
         """Liste toutes les versions du projet"""
@@ -319,7 +405,7 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
             
             project.save()
 
-            # Logger la restauration avec conversion JSON
+            # Logger la restauration
             self._log_change(
                 project=project,
                 action='restore',
@@ -336,7 +422,6 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
             "project": ProjectDetailSerializer(project).data
         })
 
-    # Gestion des documents
     @action(detail=True, methods=['post'])
     def upload_documents(self, request, pk=None):
         """Upload un ou plusieurs documents"""

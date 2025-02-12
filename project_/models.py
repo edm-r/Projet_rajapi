@@ -172,13 +172,15 @@ class ProjectMember(models.Model):
         ('active', 'Active'),
         ('invited', 'Invited'),
         ('pending', 'Pending'),
-        ('inactive', 'Inactive')  # Ajout d'un statut pour les utilisateurs supprimés
+        ('inactive', 'Inactive')
     ]
     
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='members')
     user_email = models.EmailField()  # Remplacer le ForeignKey par un EmailField
+    username = models.CharField(max_length=150, blank=True, null=True)  # Ajout du champ username
     role = models.CharField(max_length=50, choices=ROLE_CHOICES)
     joined_at = models.DateField(auto_now_add=True)
+    last_verified_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='active')
 
     class Meta:
