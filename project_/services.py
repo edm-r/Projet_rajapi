@@ -2,12 +2,13 @@ import requests
 from django.conf import settings
 from datetime import datetime
 import logging
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 class AuthService:
     def __init__(self):
-        self.base_url = "https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth"
+        self.base_url = settings.URL_B
         
     def get_user_profile(self, email, auth_token):
         """Récupère le profil utilisateur depuis le service d'auth"""

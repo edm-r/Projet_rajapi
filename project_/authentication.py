@@ -2,6 +2,7 @@ import requests
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth.models import User
+from django.conf import settings
 
 class MicroserviceTokenAuthentication(BaseAuthentication):
     def authenticate(self, request):
@@ -17,7 +18,7 @@ class MicroserviceTokenAuthentication(BaseAuthentication):
             return None
 
         # Endpoint de vérification du token
-        verify_url = 'https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/token/verify'
+        verify_url = settings.URL_V
         
         try:
             # Envoyer une requête de vérification
