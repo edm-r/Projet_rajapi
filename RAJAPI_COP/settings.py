@@ -31,7 +31,7 @@ SECRET_KEY = 'django-insecure-56%wr%y*$30&@pz#9p777h^&ezxt60f!7&&rc@w+tazd7201^7
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["rajapi-cop.onrender.com", "127.0.0.1"]
+ALLOWED_HOSTS = ["projet-rajapi.onrender.com", "127.0.0.1"]
 
 
 
