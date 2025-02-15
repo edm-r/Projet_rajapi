@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework_nested import routers
 from .views import (
-    ProjectViewSet, TaskViewSet, ProjectDocumentViewSet, test
+    ProjectViewSet, TaskViewSet, ProjectDocumentViewSet
 )
 
 router = routers.DefaultRouter()
