@@ -13,7 +13,7 @@ L'API utilise un système d'authentification basé sur des tokens (`Bearer Token
 
 #### Exemple de requête :
 ```bash
-curl -X POST https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/login/ \
+curl -X POST https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/token/ \
      -H "Content-Type: application/json" \
      -d '{"email": "user@example.com", "password": "password123"}'
 ```
