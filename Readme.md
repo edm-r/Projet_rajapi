@@ -3,7 +3,7 @@
 ## 🔐 Authentification
 L'authentification est gérée via un microservice accessible à l'URL :
 ```
-https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/token/
+https://rajapi-cop-auth-api.onrender.com/auth/token/
 ```
 L'API utilise un système d'authentification basé sur des tokens (`Bearer Token`).
 
@@ -13,7 +13,7 @@ L'API utilise un système d'authentification basé sur des tokens (`Bearer Token
 
 #### Exemple de requête :
 ```bash
-curl -X POST https://rajapi-cop-auth-api-33be22136f5e.herokuapp.com/auth/token/ \
+curl -X POST https://rajapi-cop-auth-api.onrender.com/auth/token/ \
      -H "Content-Type: application/json" \
      -d '{"email": "user@example.com", "password": "password123"}'
 ```
