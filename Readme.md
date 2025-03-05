@@ -34,14 +34,14 @@ curl -X POST https://rajapi-cop-auth-api.onrender.com/auth/token/ \
 L'API permet de gérer des projets, incluant les tâches et documents associés.
 
 ### 🔹 Lister les projets
-**URL:** `/projects/`  
+**URL:** `http://localhost:8000/api/projects/`  
 **Méthode:** `GET`  
 **Headers:**
 - `Authorization: Bearer <TOKEN>`
 
 #### Exemple de requête :
 ```bash
-curl -X GET https://api.example.com/projects/ \
+curl -X GET http://localhost:8000/api/projects/ \
      -H "Authorization: Bearer YOUR_TOKEN"
 ```
 #### Réponse :
@@ -59,20 +59,22 @@ curl -X GET https://api.example.com/projects/ \
 ```
 
 ### 🔹 Créer un projet
-**URL:** `/projects/`  
+**URL:** `http://localhost:8000/api/projects/`  
 **Méthode:** `POST`
 
 #### Exemple de requête :
 ```bash
-curl -X POST https://api.example.com/projects/ \
+curl -X POST  http://localhost:8000/api/projects/ \
      -H "Authorization: Bearer YOUR_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{
-        "title": "Nouveau Projet",
-        "description": "Description ici",
-        "objectives": "Objectifs ici",
-        "deadline": "2024-12-31",
-        "location": "Paris"
+          "title": "Projet Innovation Technologique",
+          "description": "Développement d'une solution innovante",
+          "objectives": "Créer une application révolutionnaire",
+          "start_date": "2024-03-01",
+          "deadline": "2024-12-31",
+          "location": "Yaounde, cameroun",
+          "status": "in_progress"
      }'
 ```
 
@@ -92,12 +94,12 @@ curl -X POST https://api.example.com/projects/ \
 Les tâches sont associées à un projet.
 
 ### 🔹 Créer une tâche
-**URL:** `/projects/{project_id}/tasks/`  
+**URL:** `http://localhost:8000/api/projects/{project_id}/tasks/`  
 **Méthode:** `POST`
 
 #### Exemple de requête :
 ```bash
-curl -X POST https://api.example.com/projects/1/tasks/ \
+curl -X POST http://localhost:8000/api/projects/1/tasks/ \
      -H "Authorization: Bearer YOUR_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{
@@ -115,12 +117,12 @@ curl -X POST https://api.example.com/projects/1/tasks/ \
 L'API permet d'ajouter, supprimer et vérifier les membres d'un projet.
 
 ### 🔹 Ajouter un membre
-**URL:** `/projects/{project_id}/add_member/`  
+**URL:** `http://localhost:8000/api/projects/{project_id}/add_member/`  
 **Méthode:** `POST`
 
 #### Exemple de requête :
 ```bash
-curl -X POST https://api.example.com/projects/1/add_member/ \
+curl -X POST http://localhost:8000/api/projects/1/add_member/ \
      -H "Authorization: Bearer YOUR_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{
@@ -130,22 +132,22 @@ curl -X POST https://api.example.com/projects/1/add_member/ \
 ```
 
 ### 🔹 Supprimer un membre
-**URL:** `/projects/{project_id}/remove_member/?email={user_email}`  
+**URL:** `http://localhost:8000/api/projects/{project_id}/remove_member/?email={user_email}`  
 **Méthode:** `DELETE`
 
 #### Exemple de requête :
 ```bash
-curl -X DELETE "https://api.example.com/projects/1/remove_member/?email=collaborator@example.com" \
+curl -X DELETE "http://localhost:8000/api/projects/1/remove_member/?email=collaborator@example.com" \
      -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### 🔹 Lister les membres d'un projet
-**URL:** `/projects/{project_id}/members/`  
+**URL:** `http://localhost:8000/api/projects/{project_id}/members/`  
 **Méthode:** `GET`
 
 #### Exemple de requête :
 ```bash
-curl -X GET https://api.example.com/projects/1/members/ \
+curl -X GET http://localhost:8000/api/projects/1/members/ \
      -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
@@ -155,7 +157,7 @@ curl -X GET https://api.example.com/projects/1/members/ \
 Les documents peuvent être ajoutés à un projet.
 
 ### 🔹 Uploader un document
-**URL:** `/projects/{project_id}/documents/`  
+**URL:** `http://localhost:8000/api/projects/{project_id}/documents/`  
 **Méthode:** `POST`  
 **Headers:**
 - `Authorization: Bearer <TOKEN>`
@@ -163,7 +165,7 @@ Les documents peuvent être ajoutés à un projet.
 
 #### Exemple de requête :
 ```bash
-curl -X POST https://api.example.com/projects/1/documents/ \
+curl -X POST http://localhost:8000/api/projects/1/documents/ \
      -H "Authorization: Bearer YOUR_TOKEN" \
      -F "title=Document Test" \
      -F "document_type=pdf" \
@@ -183,6 +185,21 @@ curl -X POST https://api.example.com/projects/1/documents/ \
 ```
 
 ---
+
+### Historique des Versions
+```bash
+curl -X GET http://localhost:8000/api/projects/{project_id}/versions/ \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+```
+
+### Restaurer une Version
+```bash
+curl -X POST http://localhost:8000/api/projects/1/documents/ \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -d '{
+        "version": 2
+     }'
+```
 
 ## 📌 Conclusion
 Cette documentation couvre l'ensemble des fonctionnalités de l'API, incluant l'authentification, la gestion des projets, des tâches, des documents et des membres. Pour tester l'API, utilisez des outils comme `curl`, Postman ou tout autre client API.
