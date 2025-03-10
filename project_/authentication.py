@@ -27,7 +27,10 @@ class MicroserviceTokenAuthentication(BaseAuthentication):
             
             # Vérifier si la réponse est valide
             if response.status_code != 200 or not response_data.get("token_valid", False):
-                raise AuthenticationFailed('Token invalide ou expiré')
+                raise AuthenticationFailed({
+                    "code": "INVALID_OR_EXPIRED_TOKEN",
+                    "detail": "Token invalide ou expiré."
+                })
             
             # Récupérer les informations utilisateur de la réponse
             user_data = response_data.get('user_profile', {})
@@ -47,7 +50,10 @@ class MicroserviceTokenAuthentication(BaseAuthentication):
             return (user, token)
         
         except requests.RequestException:
-            raise AuthenticationFailed('Impossible de vérifier le token')
+            raise AuthenticationFailed({
+                "code": "TOKEN_VERIFICATION_FAILED",
+                "detail": "Impossible de vérifier le token."
+            })
 
     def authenticate_header(self, request):
         return 'Bearer'

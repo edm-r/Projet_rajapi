@@ -123,13 +123,19 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         
         if not IsProjectOwner().has_object_permission(request, self, project):
             return Response(
-                {"error": "Seul le propriétaire peut ajouter des membres"},
+                {
+                    "code": "PERMISSION_DENIED",
+                    "detail": "Seul le propriétaire peut ajouter des membres."
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
         serializer = ProjectMemberSerializer(data=request.data)
         if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "code": "VALIDATION_ERROR",
+                "detail": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data['user_email']
         role = serializer.validated_data.get('role', 'collaborator')
@@ -161,7 +167,10 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                         member.save()
                     else:
                         return Response(
-                            {"error": "L'utilisateur est déjà membre du projet"},
+                            {
+                                "code": "USER_ALREADY_MEMBER",
+                                "detail": "L'utilisateur est déjà membre du projet."
+                            },
                             status=status.HTTP_400_BAD_REQUEST
                         )
 
@@ -173,14 +182,19 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                 )
 
                 return Response(
-                    {"message": "Membre ajouté avec succès", 
-                    "member": ProjectMemberSerializer(member).data},
+                    {
+                        "message": "Membre ajouté avec succès",
+                        "member": ProjectMemberSerializer(member).data
+                    },
                     status=status.HTTP_201_CREATED
                 )
 
         except requests.RequestException as e:
             return Response(
-                {"error": "Erreur de communication avec le service d'authentification"},
+                {
+                    "code": "AUTH_SERVICE_ERROR",
+                    "detail": "Erreur de communication avec le service d'authentification."
+                },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
@@ -189,14 +203,20 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         project = self.get_object()
         if not IsProjectOwner().has_object_permission(request, self, project):
             return Response(
-                {"error": "Seul le propriétaire peut retirer des membres"},
+                {
+                    "code": "PERMISSION_DENIED",
+                    "detail": "Seul le propriétaire peut retirer des membres."
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
         email = request.query_params.get('email')
         if not email:
             return Response(
-                {"error": "L'email de l'utilisateur est requis"},
+                {
+                    "code": "MISSING_EMAIL",
+                    "detail": "L'email de l'utilisateur est requis."
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -208,7 +228,10 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
             )
             if member.role == 'owner':
                 return Response(
-                    {"error": "Impossible de retirer le propriétaire du projet"},
+                    {
+                        "code": "CANNOT_REMOVE_OWNER",
+                        "detail": "Impossible de retirer le propriétaire du projet."
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
@@ -225,7 +248,10 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ProjectMember.DoesNotExist:
             return Response(
-                {"error": "Membre non trouvé"},
+                {
+                    "code": "MEMBER_NOT_FOUND",
+                    "detail": "Membre non trouvé."
+                },
                 status=status.HTTP_404_NOT_FOUND
             )
 
@@ -236,7 +262,10 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         
         if not IsProjectOwner().has_object_permission(request, self, project):
             return Response(
-                {"error": "Seul le propriétaire peut vérifier les membres"},
+                {
+                    "code": "PERMISSION_DENIED",
+                    "detail": "Seul le propriétaire peut vérifier les membres."
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -264,7 +293,10 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         # Vérifier que l'utilisateur est membre du projet
         if not IsProjectMember().has_object_permission(request, self, project):
             return Response(
-                {"error": "Vous n'êtes pas autorisé à voir les membres de ce projet"},
+                {
+                    "code": "PERMISSION_DENIED",
+                    "detail": "Vous n'êtes pas autorisé à voir les membres de ce projet."
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
         
@@ -353,14 +385,20 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         serializer = RestoreVersionSerializer(data=request.data)
         
         if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "code": "VALIDATION_ERROR",
+                "detail": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         target_version = serializer.validated_data['version']
         logs = project.logs.all().order_by('timestamp')
 
         if target_version > logs.count():
             return Response(
-                {"error": f"La version {target_version} n'existe pas. Version max: {logs.count()}"},
+                {
+                    "code": "VERSION_NOT_FOUND",
+                    "detail": f"La version {target_version} n'existe pas. Version max: {logs.count()}"
+                },
                 status=status.HTTP_404_NOT_FOUND
             )
 
@@ -428,14 +466,20 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         project = self.get_object()
         if not IsProjectMember().has_object_permission(request, self, project):
             return Response(
-                {"error": "Seuls les membres du projet peuvent uploader des documents"},
+                {
+                    "code": "PERMISSION_DENIED",
+                    "detail": "Seuls les membres du projet peuvent uploader des documents."
+                },
                 status=status.HTTP_403_FORBIDDEN
             )
 
         files = request.FILES.getlist('documents')
         if not files:
             return Response(
-                {"error": "Aucun document fourni"},
+                {
+                    "code": "NO_DOCUMENTS_PROVIDED",
+                    "detail": "Aucun document fourni."
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
 
