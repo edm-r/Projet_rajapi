@@ -47,14 +47,25 @@ curl -X GET http://localhost:8000/api/projects/ \
 #### Réponse :
 ```json
 [
-  {
-    "id": 1,
-    "reference_number": "RJPC-2024-12345",
-    "title": "Projet Alpha",
-    "description": "Description du projet",
-    "status": "in_progress",
-    "owner": "user@example.com"
-  }
+    {
+        "id": 3,
+        "reference_number": "RJPC-2025-28787",
+        "title": "Projet de Reforestation RAJAPI-COP",
+        "status": "in_progress",
+        "start_date": "2024-01-01",
+        "deadline": "2024-12-31",
+        "location": "Sahel, Cameroun",
+        "created_at": "2025-03-19T13:35:18.582401Z",
+        "owner_details": {
+            "id": 2,
+            "username": "test01",
+            "email": "eds@gmail.com",
+            "first_name": "eds",
+            "last_name": "julle"
+        },
+        "version_count": 1,
+        "document_count": 0
+    },
 ]
 ```
 
@@ -81,10 +92,38 @@ curl -X POST  http://localhost:8000/api/projects/ \
 #### Réponse :
 ```json
 {
-  "id": 2,
-  "reference_number": "RJPC-2024-67890",
-  "title": "Nouveau Projet",
-  "status": "in_progress"
+    "id": 4,
+    "reference_number": "RJPC-2025-41129",
+    "title": "Projet de Reforestation RAJAPI-COP",
+    "description": "Projet de reforestation dans la région du Sahel",
+    "objectives": "Planter 1000 arbres en 6 mois",
+    "deadline": "2024-12-31",
+    "status": "in_progress",
+    "owner": 2,
+    "start_date": "2024-01-01",
+    "location": "Sahel, Cameroun",
+    "created_at": "2025-03-19T13:45:42.974210Z",
+    "updated_at": "2025-03-19T13:45:42.974224Z",
+    "owner_details": {
+        "id": 2,
+        "username": "eds",
+        "email": "eds@gmail.com",
+        "first_name": "eds",
+        "last_name": "julle"
+    },
+    "members": [
+        {
+            "id": 4,
+            "email": "eds@gmail.com",
+            "username": null,
+            "role": "owner",
+            "joined_at": "2025-03-19",
+            "status": "active"
+        }
+    ],
+    "tasks": [],
+    "documents": [],
+    "current_version": 0
 }
 ```
 
