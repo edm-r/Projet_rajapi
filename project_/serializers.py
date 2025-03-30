@@ -147,9 +147,10 @@ class ProjectListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            'id', 'reference_number', 'title', 'status', 
-            'start_date', 'deadline', 'location', 'created_at', 
-            'owner_details', 'version_count', 'document_count'
+            'id', 'reference_number', 'title', 'description', 
+            'objectives','status','start_date', 'deadline', 
+            'location', 'created_at', 'owner_details', 'version_count', 
+            'document_count'
         ]
 
     def get_version_count(self, obj):
