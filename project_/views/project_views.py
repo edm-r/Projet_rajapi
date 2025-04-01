@@ -123,28 +123,30 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
         
         if not IsProjectOwner().has_object_permission(request, self, project):
             return Response(
-                {
-                    "code": "PERMISSION_DENIED",
-                    "detail": "Seul le propriétaire peut ajouter des membres."
-                },
+                {"code": "PERMISSION_DENIED", "detail": "Seul le propriétaire peut ajouter des membres."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
         serializer = ProjectMemberSerializer(data=request.data)
         if not serializer.is_valid():
-            return Response({
-                "code": "VALIDATION_ERROR",
-                "detail": serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"code": "VALIDATION_ERROR", "detail": serializer.errors}, 
+                        status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data['user_email']
         role = serializer.validated_data.get('role', 'collaborator')
         auth_header = request.headers.get('Authorization')
 
-        # Vérifier si l'utilisateur existe dans le service d'auth et récupérer son profil
         try:
+            # Vérification en deux étapes
+            if not self.member_service.auth_service.verify_user_exists(email, auth_header):
+                return Response(
+                    {"code": "USER_NOT_FOUND", "detail": "L'utilisateur n'existe pas dans le système d'authentification."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Récupération du profil complet
             user_profile = self.member_service.auth_service.get_user_profile(email, auth_header)
-            username = user_profile.get('username')  # Récupérer le username depuis le profil
+            username = user_profile.get('username', email.split('@')[0])  # Fallback si username absent
 
             with transaction.atomic():
                 member, created = ProjectMember.objects.get_or_create(
@@ -154,7 +156,7 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                         'role': role,
                         'status': 'active',
                         'last_verified_at': timezone.now(),
-                        'username': username  # Ajout du username
+                        'username': username
                     }
                 )
 
@@ -163,14 +165,11 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                         member.status = 'active'
                         member.role = role
                         member.last_verified_at = timezone.now()
-                        member.username = username  # Mise à jour du username
+                        member.username = username
                         member.save()
                     else:
                         return Response(
-                            {
-                                "code": "USER_ALREADY_MEMBER",
-                                "detail": "L'utilisateur est déjà membre du projet."
-                            },
+                            {"code": "USER_ALREADY_MEMBER", "detail": "L'utilisateur est déjà membre du projet."},
                             status=status.HTTP_400_BAD_REQUEST
                         )
 
@@ -189,13 +188,16 @@ class ProjectViewSet(ChangeLogMixin, viewsets.ModelViewSet):
                     status=status.HTTP_201_CREATED
                 )
 
-        except requests.RequestException as e:
+        except Exception as e:
+            error_code = getattr(e, 'code', 'AUTH_SERVICE_ERROR')
+            error_detail = getattr(e, 'detail', str(e))
+            
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE if error_code == "AUTH_SERVICE_ERROR" \
+                        else status.HTTP_400_BAD_REQUEST
+            
             return Response(
-                {
-                    "code": "AUTH_SERVICE_ERROR",
-                    "detail": "Erreur de communication avec le service d'authentification."
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE
+                {"code": error_code, "detail": error_detail},
+                status=status_code
             )
 
     @action(detail=True, methods=['delete'])
